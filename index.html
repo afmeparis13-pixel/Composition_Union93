@@ -34,6 +34,9 @@ section.compo[hidden]{display:none}
 .titre{background:var(--noir);color:#fff;padding:10px 14px;font-size:18px;font-weight:800;border-bottom:4px solid var(--jaune);
   display:flex;align-items:center;justify-content:space-between}
 .titre small{font-weight:600;font-size:12px;opacity:.85}
+.droite{display:flex;align-items:center;gap:10px}
+.png{border:none;background:var(--jaune);color:var(--noir);font-weight:800;font-size:12px;padding:6px 10px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.png:disabled{opacity:.6}
 .sous{margin:14px 12px 4px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--rouge);
   display:flex;align-items:center;gap:8px}
 .sous::after{content:"";flex:1;height:2px;background:linear-gradient(90deg,var(--argent),transparent)}
@@ -106,21 +109,21 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 <main id="main">
   <p class="aide" id="aide"></p>
   <section class="compo" data-s="xv">
-    <div class="titre">Compo XV <small id="c-xv"></small></div>
+    <div class="titre">Compo XV <span class="droite"><small id="c-xv"></small><button type="button" class="png" data-png="xv">Extraire PNG</button></span></div>
     <div class="sous">Titulaires</div>
     <div class="terrain" id="xv-tit"></div>
     <div class="sous">Remplaçantes</div>
     <div class="terrain" id="xv-rem"></div>
   </section>
   <section class="compo" data-s="x">
-    <div class="titre">Compo X <small id="c-x"></small></div>
+    <div class="titre">Compo X <span class="droite"><small id="c-x"></small><button type="button" class="png" data-png="x">Extraire PNG</button></span></div>
     <div class="sous">Titulaires</div>
     <div class="terrain" id="x-tit"></div>
     <div class="sous">Remplaçantes</div>
     <div class="terrain" id="x-rem"></div>
   </section>
   <section class="compo" data-s="indispo">
-    <div class="titre">Filles indispo</div>
+    <div class="titre">Filles indispo <span class="droite"><button type="button" class="png" data-png="indispo">Extraire PNG</button></span></div>
     <div class="sous">Joueuses blessées</div>
     <div class="grille" id="bl"></div>
     <div class="sous">Joueuses indisponibles</div>
@@ -468,6 +471,121 @@ $("reset").onclick=async()=>{
   for(const pid of Object.keys(PH)) oublierPhoto("p:"+pid);
   etat=origine(); await sauver();
 };
+
+/* ---------- Extraction d'une composition en image PNG ---------- */
+const LOGO_SRC=document.querySelector(".haut img").src;
+const NOMS_SECTION={xv:"Compo XV",x:"Compo X",indispo:"Filles indispo"};
+const POLICE='-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
+const C={noir:"#141414",rouge:"#ab0d10",jaune:"#dcc22e",doux:"#5b6470",argent:"#c9cdd2"};
+const chargerImg=src=>new Promise(ok=>{ if(!src) return ok(null); const im=new Image(); im.onload=()=>ok(im); im.onerror=()=>ok(null); im.src=src; });
+// Image au format portrait Instagram (1080 × 1350). Les postes vides ne sont pas dessinés,
+// la pastille « 1ère ligne » non plus ; le « C » du capitaine reste.
+const W=1080, H=1350, M=36, ENTETE=200, SOUS=50, PIED=44, LAB=0.24;
+const aEtiquette=l=>l.some(([loc])=>{ const j=etat.joueuses[lire(loc)]; return j&&(j.cmt||!srcPhoto(j.photo)); });
+function blocsDe(section,cols){
+  const plein=([loc])=>!!lire(loc);
+  if(section!=="indispo"){
+    const k=section; // "xv" ou "x"
+    const tit=DISPO[k+"-tit"].map(l=>l.filter(plein)).filter(l=>l.length);
+    const rem=par(DISPO[k+"-rem"].flat().filter(plein),cols);
+    return [["Titulaires",tit,3,true],["Remplaçantes",rem,cols,true]].filter(b=>b[1].length);
+  }
+  return [["Joueuses blessées","bl"],["Joueuses indisponibles","in"],["Joueuses hors-groupe","ho"]]
+    .filter(([,g])=>etat[g].length).map(([t,g])=>[t,par(etat[g].map((_,i)=>[g+":"+i,null]),cols),cols,false]);
+}
+const par=(a,n)=>{ const r=[]; for(let i=0;i<a.length;i+=n) r.push(a.slice(i,i+n)); return r; };
+function raccourcir(g,texte,largeur){ // une seule ligne, coupée avec « … » si trop longue
+  if(g.measureText(texte).width<=largeur) return texte;
+  while(texte.length>1&&g.measureText(texte+"…").width>largeur) texte=texte.slice(0,-1);
+  return texte.trimEnd()+"…";
+}
+async function dessinerPNG(section){
+  // choisir le nombre de joueuses par ligne (remplaçantes, listes) pour que tout tienne dans l'image
+  let blocs, h;
+  for(const cols of [3,4,5,6]){
+    blocs=blocsDe(section,cols);
+    const n=blocs.reduce((s,b)=>s+b[1].length,0)||1, nl=blocs.reduce((s,b)=>s+b[1].filter(aEtiquette).length,0);
+    h=Math.min(270,(H-ENTETE-PIED-16-blocs.length*SOUS)/(n+LAB*nl));
+    if(h>=165) break;
+  }
+  const logo=await chargerImg(LOGO_SRC), maillot=await chargerImg(MAILLOT);
+  const c=document.createElement("canvas"); c.width=W; c.height=H; const g=c.getContext("2d");
+  // fond et en-tête avec logo
+  g.fillStyle="#fff"; g.fillRect(0,0,W,H);
+  g.fillStyle=C.noir; g.fillRect(0,0,W,ENTETE);
+  g.fillStyle=C.rouge; g.fillRect(0,0,W/2,12); g.fillStyle=C.jaune; g.fillRect(W/2,0,W/2,12);
+  g.fillStyle=C.jaune; g.fillRect(0,ENTETE-9,W,9);
+  if(logo){ const lh=142; g.drawImage(logo,M+4,(ENTETE-lh)/2+2,lh*logo.naturalWidth/logo.naturalHeight,lh); }
+  const tx=M+200; g.textAlign="left"; g.textBaseline="alphabetic";
+  g.fillStyle="#fff"; g.font=`800 40px ${POLICE}`; g.fillText("Composition",tx,68);
+  const wc=g.measureText("Composition ").width;
+  g.fillStyle=C.jaune; g.fillText("-",tx+wc,68); g.fillStyle="#fff"; g.fillText(" U93",tx+wc+g.measureText("-").width,68);
+  g.fillStyle=C.jaune; g.font=`900 66px ${POLICE}`; g.fillText(NOMS_SECTION[section].toUpperCase(),tx,138);
+  const date=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  g.fillStyle="#b9b9b9"; g.font=`600 26px ${POLICE}`; g.fillText(date.charAt(0).toUpperCase()+date.slice(1),tx,176);
+  // blocs : marge verticale répartie pour remplir la hauteur
+  const n=blocs.reduce((s,b)=>s+b[1].length,0), nl=blocs.reduce((s,b)=>s+b[1].filter(aEtiquette).length,0);
+  const libre=H-ENTETE-PIED-blocs.length*SOUS-(n+LAB*nl)*h, ecart=Math.max(0,libre/(blocs.length+1));
+  let y=ENTETE+Math.min(ecart,24);
+  for(const [titre,lignes,cols,numerote] of blocs){
+    g.fillStyle=C.rouge; g.font=`800 30px ${POLICE}`; g.textAlign="left";
+    const t=titre.toUpperCase(); g.fillText(t,M+6,y+38);
+    const fin=M+6+g.measureText(t).width+18;
+    const grad=g.createLinearGradient(fin,0,W-M,0); grad.addColorStop(0,C.argent); grad.addColorStop(1,"rgba(201,205,210,0)");
+    g.fillStyle=grad; g.fillRect(fin,y+27,W-M-fin,4);
+    y+=SOUS;
+    const COL=(W-2*M)/cols;
+    for(const l of lignes){
+      const x0=numerote?M+(cols-l.length)*COL/2:M;   // compos centrées, listes alignées à gauche
+      const etiquette=aEtiquette(l);
+      for(let i=0;i<l.length;i++) await dessinerCase(g,l[i],x0+i*COL,y,COL,h,numerote,etiquette,maillot);
+      y+=h+(etiquette?LAB*h:0);   // toutes les photos ont la même taille ; la ligne s'allonge pour le nom ou le texte
+    }
+    y+=Math.min(ecart,24);
+  }
+  g.fillStyle="#9a9a9a"; g.font=`600 22px ${POLICE}`; g.textAlign="center"; g.fillText("Union 93 · Composition - U93",W/2,H-18);
+  return c;
+}
+async function dessinerCase(g,[loc,num],x,y,col,h,numerote,etiquette,maillot){
+  const j=etat.joueuses[lire(loc)]; if(!j) return;
+  const src=srcPhoto(j.photo), img=src?await chargerImg(src):maillot;
+  const cx=x+col/2;
+  const numH=numerote?h*0.2:0, labH=LAB*h, pH=h-numH-6;
+  if(numerote){ g.fillStyle=C.rouge; g.font=`900 ${Math.round(numH*0.85)}px ${POLICE}`; g.textAlign="center"; g.fillText(String(num),cx,y+numH*0.85); }
+  const top=y+numH, pW=Math.min(col-14,pH*0.95);
+  if(img){
+    const mw=src?pW:pW*0.82, mh=src?pH:pH*0.86;
+    const r=Math.min(mw/img.naturalWidth,mh/img.naturalHeight), w=img.naturalWidth*r, hh=img.naturalHeight*r;
+    g.drawImage(img,cx-w/2,top+pH-hh,w,hh);
+  }
+  if(j.cap){ // pastille capitaine
+    const rr=Math.max(16,pH*0.12), px=cx+pW/2-rr, py=top+rr;
+    g.beginPath(); g.arc(px,py,rr,0,Math.PI*2); g.fillStyle=C.jaune; g.fill(); g.lineWidth=Math.max(2.5,rr*0.13); g.strokeStyle=C.noir; g.stroke();
+    g.fillStyle=C.noir; g.font=`800 ${Math.round(rr*1.15)}px ${POLICE}`; g.textAlign="center"; g.textBaseline="middle"; g.fillText("C",px,py+1); g.textBaseline="alphabetic";
+  }
+  let ly=top+pH+4; g.textAlign="center";
+  if(!src){ const fs=Math.round(Math.min(labH*0.55,30)); g.fillStyle=C.noir; g.font=`800 ${fs}px ${POLICE}`; g.fillText(raccourcir(g,j.nom||"",col-10),cx,ly+fs); ly+=fs+4; }
+  if(j.cmt){ const fs=Math.round(Math.min(labH*0.4,24)); g.fillStyle=C.doux; g.font=`italic 500 ${fs}px ${POLICE}`; g.fillText(raccourcir(g,j.cmt,col-10),cx,ly+fs); }
+}
+async function extrairePNG(section,bouton){
+  const texte=bouton.textContent; bouton.disabled=true; bouton.textContent="…";
+  try{
+    const c=await dessinerPNG(section);
+    const blob=await new Promise(ok=>c.toBlob(ok,"image/png"));
+    const nom=`${NOMS_SECTION[section].replace(/\s+/g,"-")}_U93_${new Date().toISOString().slice(0,10)}.png`;
+    const fichier=new File([blob],nom,{type:"image/png"});
+    const tactile=matchMedia("(pointer:coarse)").matches;
+    if(tactile&&navigator.canShare&&navigator.canShare({files:[fichier]})){
+      try{ await navigator.share({files:[fichier],title:NOMS_SECTION[section]+" - U93"}); }catch(e){ if(e.name!=="AbortError") throw e; }
+    } else {
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=nom;
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    }
+  }catch(e){ alert("Impossible de créer l'image ("+(e.message||e)+")."); }
+  finally{ bouton.disabled=false; bouton.textContent=texte; }
+}
+document.querySelectorAll("[data-png]").forEach(b=>b.addEventListener("click",()=>extrairePNG(b.dataset.png,b)));
+window.dessinerPNG=dessinerPNG; // utilisé pour les tests
 
 /* ---------- Démarrage ---------- */
 appliquerFiltres(); majMode();
